@@ -1,0 +1,4 @@
+passwd_mysql_root: Level123
+passwd_mysql_siteru: siteru
+mysql_siteru_user: siteru
+db_wp: siteru

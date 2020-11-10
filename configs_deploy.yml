@@ -1,0 +1,346 @@
+---
+- name: Deploy Configs
+  hosts: sites
+  become: True
+  vars_files:
+    - vars/ext_vars.yml
+  tasks:
+   - name: Update all packages to the latest version
+     apt:
+       update_cache: yes
+       force_apt_get: yes
+
+
+   - name: Install Nginx net-tools mysql
+     become: True
+     apt: 
+      name: "{{ packages }}"
+      update_cache: yes
+      force_apt_get: yes
+     vars:
+      packages:
+      - nginx
+      - apt-transport-https
+      - net-tools
+      - mysql-server
+      - python-mysqldb
+      - git
+      - curl
+      - mc
+     tags:
+      - packages     
+
+   - name: Create backup of orig files nginx
+     shell: |
+       mkdir /etc/nginx.orig && cp -r /etc/nginx/* /etc/nginx.orig/
+       mkdir /etc/mysql.orig && cp -r /etc/mysql/* /etc/mysql.orig/
+   
+   
+   - name: Copy Nginx Configuration File
+     template: 
+      src: templates/nginx/nginx.conf.j2 
+      dest: /etc/nginx/nginx.conf
+      backup: yes
+
+   - name: stop nginx
+     service:
+       name: nginx
+       state: stopped
+
+
+
+   - name: Install Apache2
+     become: True
+     apt:
+      name: "{{ packages }}"
+      update_cache: yes
+      force_apt_get: yes
+     vars:
+      packages:
+      - apache2
+     tags:
+      - packages-apache2
+
+   - name: Create backup of orig files apache2
+     shell: |
+       mkdir /etc/apache2.orig && cp -r /etc/apache2/* /etc/apache2.orig/
+
+
+   - name: Copy apache2 Ports Configuration File
+     template:
+      src: templates/apache2/ports.conf.j2
+      dest: /etc/apache2/ports.conf
+      backup: yes
+   - name: Copy apache2 Security Configuration File
+     template:
+      src: templates/apache2/security.conf.j2
+      dest: /etc/apache2/conf-available/security.conf
+      backup: yes
+   - name: Copy apache2 Main Configuration File
+     template:
+      src: templates/apache2/apache2.conf.j2
+      dest: /etc/apache2/conf-available/apache2.conf
+      backup: yes
+     notify: restart apache2
+   - name: restart apache2
+     service:
+       name: apache2
+       state: restarted
+
+
+   - name: start nginx
+     service:
+       name: nginx
+       state: started
+
+
+   - name: check running apache2 & nginx
+     shell: netstat -ntlp
+     register: netstat
+
+   - name: Show netstat
+     debug: var=netstat
+
+   - name: Add apt key for php-fpm
+     apt_key:
+      url: https://packages.sury.org/php/apt.gpg
+      state: present
+
+   - name: Add repository for php-fpm
+     apt_repository:
+      repo: deb https://packages.sury.org/php/ stretch main
+      state: present
+      filename: php
+
+   - name: Istall php7.4-fpm
+     become: True
+     apt:
+      name: "{{ packages }}"
+      update_cache: yes
+      force_apt_get: yes
+     vars:
+      packages:
+      - php7.4-fpm
+      - php7.4-mysql
+      - php-mbstring
+     tags:
+      - packages-php
+
+   - name: Create backup of orig files php
+     shell: |
+       mkdir /etc/php.orig && cp -r /etc/php/* /etc/php.orig/
+
+
+   - name: Enable  Apache2 modules proxy_fcgi  
+     community.general.apache2_module:
+      state: present
+      name: proxy_fcgi
+     ignore_errors: yes
+
+   - name: Enable  Apache2 conf php7.4-fpm
+     shell: a2enconf php7.4-fpm
+     notify: restart apache2
+     ignore_errors: yes
+
+   - name: Add user siteru
+     user:
+      name: siteru
+      shell: /bin/false
+      create_home: no
+      system: yes
+      append: yes
+
+   - name: Creates directory for site logs, tmp_files, sessions
+     file:
+      path: "{{ item }}"
+      state: directory
+      owner: siteru
+      group: siteru
+      mode: 0775
+      recurse: yes
+     with_items:
+      - /var/www/site.ru/http_logs/apache2
+      - /var/www/site.ru/http_logs/nginx
+      - /var/www/site.ru/http_sessions
+      - /var/www/site.ru/tmp_files
+      - /var/www/site.ru/public
+
+   - name: Copy php-fpm site.ru Configuration File
+     template:
+      src: templates/php-fpm/site.ru.conf.j2
+      dest: /etc/php/7.4/fpm/pool.d/site.ru.conf
+      backup: yes
+
+   - name: Copy nginx site.ru Configuration File
+     template:
+      src: templates/nginx/site.ru.conf.j2
+      dest: /etc/nginx/sites-available/site.ru.conf
+      backup: yes
+
+   - name: Enable site site.ru nginx
+     command: ln -s /etc/nginx/sites-available/site.ru.conf /etc/nginx/sites-enabled/site.ru.conf
+     notify: restart nginx
+     ignore_errors: yes
+ 
+   - name: Copy php-fpm php.ini Configuration File
+     template:
+      src: templates/php-fpm/php.ini.j2
+      dest: /etc/php/7.4/fpm/php.ini
+      backup: yes
+
+
+   - name:  mysql_secure_installation
+     mysql_secure_installation:
+      login_password: Level123
+      new_password: "{{ passwd_mysql_root }}"
+      user: root
+      login_host: localhost
+      hosts: ['localhost', '127.0.0.1', '::1']
+      change_root_password: true
+      remove_anonymous_user: true
+      disallow_root_login_remotely: true
+      remove_test_db: true
+     register: mysql_secure
+   - debug:
+        var: mysql_secure
+
+   - name: Copy MYSQL Main Configuration File
+     template:
+      src: templates/mysql/50-server.cnf.j2
+      dest: /etc/mysql/mariadb.conf.d/50-server.cnf
+      backup: yes
+
+   - name: restart MYSQL
+     service:
+      name: mysql
+      state: restarted
+
+
+   - name: Set auth for root
+     shell: "mysql -e \"use mysql; 
+             UPDATE user SET plugin='' WHERE user ='root'; 
+             UPDATE mysql.user SET authentication_string = PASSWORD('{{ passwd_mysql_root }}') WHERE User = 'root' AND Host = 'localhost'; FLUSh PRIVILEGES;\" 
+            -uroot -p'{{ passwd_mysql_root }}'"
+     ignore_errors: yes
+
+   - name: Disable default site apache2
+     command: a2dissite 000-default.conf
+
+   - name: Copy site.ru conf file
+     template:
+      src: templates/apache2/site.ru.conf.j2
+      dest: /etc/apache2/sites-available/site.ru.conf
+      backup: yes
+
+   - name: Enable site.ru apache2
+     command: a2ensite site.ru.conf
+     
+   - name: Create database for wordpress
+     shell: "mysql -e \"use mysql;
+             CREATE DATABASE {{ db_wp }};
+             CREATE USER '{{ mysql_siteru_user}}'@'localhost' IDENTIFIED BY '{{ passwd_mysql_siteru }}';
+             GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX, DROP, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON {{ db_wp }}.* TO '{{ mysql_siteru_user }}'@'localhost'; 
+             FLUSH PRIVILEGES;\"
+            -uroot -p'{{ passwd_mysql_root }}'"
+     ignore_errors: yes
+
+   - name: Get Latest WP
+     shell: |
+           curl  https://ru.wordpress.org/latest-ru_RU.tar.gz -o /tmp/latest-ru_RU.tar.gz
+           cd /tmp && tar -xvf latest-ru_RU.tar.gz
+           cp -r wordpress/* /var/www/site.ru/public
+
+
+   - name: Add user siteru-2
+     user:
+      name: site-2.ru
+      shell: /bin/false
+      create_home: no
+      system: yes
+      append: yes
+
+   - name: Creates directory for site logs, tmp_files, sessions
+     file:
+      path: "{{ item }}"
+      state: directory
+      owner: site-2.ru
+      group: site-2.ru
+      mode: 0775
+      recurse: yes
+     with_items:
+      - /var/www/site-2.ru/http_logs/apache2
+      - /var/www/site-2.ru/http_logs/nginx
+      - /var/www/site-2.ru/http_sessions
+      - /var/www/site-2.ru/tmp_files
+      - /var/www/site-2.ru/public
+     notify: restart php-fpm
+   - name: Copy php-fpm site-2.ru Configuration File
+     template:
+      src: templates/php-fpm/site-2.ru.conf.j2
+      dest: /etc/php/7.4/fpm/pool.d/site-2.ru.conf
+      backup: yes
+
+   - name: Copy nginx site.ru Configuration File
+     template:
+      src: templates/nginx/site-2.ru.conf.j2
+      dest: /etc/nginx/sites-available/site-2.ru.conf
+      backup: yes
+
+   - name: Enable site site-2.ru nginx
+     command: ln -s /etc/nginx/sites-available/site-2.ru.conf /etc/nginx/sites-enabled/site-2.ru.conf
+     notify: restart nginx
+     ignore_errors: yes
+
+   - name: Copy site-2.ru conf file
+     template:
+      src: templates/apache2/site-2.ru.conf.j2
+      dest: /etc/apache2/sites-available/site-2.ru.conf
+      backup: yes
+
+   - name: Enable site-2.ru apache2
+     command: a2ensite site-2.ru.conf
+
+
+
+   - name: Deploy Code From Github
+     git: 
+        dest=/tmp/filemanager
+        repo=https://github.com/alexantr/filemanager.git
+      update=yes
+      force=yes
+
+   - name: Copy filmanager.php
+     command: cp /tmp/filemanager/filemanager.php /var/www/site-2.ru/public/index.php
+
+   - name: Get Latest phpmyadmin
+     shell: |
+           curl  https://files.phpmyadmin.net/phpMyAdmin/5.0.4/phpMyAdmin-5.0.4-all-languages.zip -o /tmp/phpMyAdmin-5.0.4-all-languages.zip
+           unzip -o /tmp/phpMyAdmin-5.0.4-all-languages.zip 
+           mkdir /usr/share/phpmyadmin && mkdir /usr/share/phpmyadmin/tmp && chmod -R 777 /usr/share/phpmyadmin/tmp  && cp -r phpMyAdmin-5.0.4-all-languages/* /usr/share/phpmyadmin/
+     ignore_errors: yes
+
+   - name: Configure phpmyadmin
+     template:
+      src: templates/phpmyadmin/config.inc.php.j2
+      dest: /usr/share/phpmyadmin/config.inc.php
+      backup: yes
+
+
+
+  handlers:
+    - name: restart apache2
+      service:
+       name: apache2
+       state: restarted
+    - name: restart nginx
+      service:
+       name: nginx
+       state: restarted
+    - name: restart php-fpm
+      service:
+       name: php7.4-fpm
+       state: restarted
+    - name: restart mysql
+      service:
+       name: mysql
+       state: restarted

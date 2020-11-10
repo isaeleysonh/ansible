@@ -1,0 +1,13 @@
+	[site-2.ru]
+	listen = /var/run/php/php7.4-site-2.ru.sock
+	listen.mode = 0666
+	user = site-2.ru 
+	group = site-2.ru
+	chdir = /var/www/site-2.ru 
+	listen.owner = site-2.ru 
+	listen.group = site-2.ru
+	php_admin_value[upload_tmp_dir] = /var/www/site-2.ru/tmp_files
+	php_admin_value[session.save_path] = /var/www/site-2.ru/http_sessions
+	php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,curl_multi_exec,parse_ini_file,show_source
+	pm = ondemand
+	pm.max_children = 4

@@ -1,0 +1,33 @@
+<VirtualHost 127.0.0.1:81>
+    ServerName site.ru
+    ServerAdmin mail@site.ru
+    DocumentRoot /var/www/site.ru/public
+    CustomLog /var/www/site.ru/http_logs/apache2/site.ru.access.log combined
+    ErrorLog /var/www/site.ru/http_logs/apache2/site.ru.error.log
+	<Directory /var/www/site.ru/public>
+	        Options -Includes -Indexes -ExecCGI
+        	AllowOverride All 
+	</Directory>
+	<FilesMatch \.php$>
+		SetHandler "proxy:unix:/var/run/php/php7.4-siteru.sock|fcgi://localhost/"
+	</FilesMatch>
+
+Alias /phpmyadmin /usr/share/phpmyadmin
+Alias /pma /usr/share/phpmyadmin
+<Directory /usr/share/phpmyadmin>
+    Options SymLinksIfOwnerMatch
+    DirectoryIndex index.php
+</Directory>
+
+# Disallow web access to directories that don't need it
+<Directory /usr/share/phpmyadmin/templates>
+    Require all denied
+</Directory>
+<Directory /usr/share/phpmyadmin/libraries>
+    Require all denied
+</Directory>
+
+
+
+
+</VirtualHost>

@@ -1,0 +1,17 @@
+
+[siteru]
+listen = /var/run/php/php7.4-siteru.sock
+listen.mode = 0666
+user = siteru
+group = siteru
+chdir = /var/www/site.ru/public
+
+listen.owner = siteru
+listen.group = siteru
+
+
+php_admin_value[upload_tmp_dir] = /var/www/site.ru/tmp_files
+php_admin_value[session.save_path] = /var/www/site.ru/http_sessions
+php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,curl_multi_exec,parse_ini_file,show_source
+pm = ondemand
+pm.max_children = 4
